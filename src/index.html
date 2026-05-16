@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+    <meta name="theme-color" content="#09090f"/>
+    <meta name="description" content="Bar POS — Sistema de punto de venta para bar"/>
+    <meta name="mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+    <meta name="apple-mobile-web-app-title" content="Bar POS"/>
+    <link rel="manifest" href="/manifest.json"/>
+    <link rel="apple-touch-icon" href="/icon.svg"/>
+    <title>Bar POS</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{background:#09090f;-webkit-tap-highlight-color:transparent;}
+      #install-banner{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+        background:#f5c842;color:#0a0a0f;border:none;border-radius:12px;padding:12px 24px;
+        font-size:15px;font-weight:700;cursor:pointer;z-index:9999;box-shadow:0 4px 20px rgba(245,200,66,0.4);
+        font-family:system-ui,sans-serif;}
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <button id="install-banner">📲 Instalar Bar POS como app</button>
+    <script type="module" src="/src/index.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+      let deferredPrompt;
+      const banner = document.getElementById('install-banner');
+      window.addEventListener('beforeinstallprompt', e => {
+        e.preventDefault();
+        deferredPrompt = e;
+        banner.style.display = 'block';
+      });
+      banner.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        banner.style.display = 'none';
+      });
+      window.addEventListener('appinstalled', () => { banner.style.display = 'none'; });
+    </script>
+  </body>
+</html>
