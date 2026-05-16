@@ -291,7 +291,7 @@ export default function BarApp() {
     addAudit, saveDailyLog, clearDailyLog,
   } = fb;
 
-  // ── UI state ──────────────────────────────────────────────
+  // ── UI state ────────────────────────────────────────────── 
   const [view,     setView]     = useState("floor");
   const [activeId, setActiveId] = useState(null);
   const [nightRpt, setNightRpt] = useState(null);
