@@ -1968,27 +1968,6 @@ function MonthlyView({dailyLog,inventory,monthlyExp,credits,onBack,onCloseMonth}
       </div>
     );
   }
-  const totalCash=dailyLog.reduce((s,d)=>s+d.cash,0);
-  const totalTransfer=dailyLog.reduce((s,d)=>s+d.transfer,0);
-  const totalExpDay=dailyLog.reduce((s,d)=>s+(d.expenses||0),0);
-  const totalExpMonth=(monthlyExp||[]).reduce((s,e)=>s+(e.amount||0),0);
-  const totalExp=totalExpDay+totalExpMonth;
-  const totalNet=totalGross-totalExp;
-  const avgNight=dailyLog.length?Math.round(totalGross/dailyLog.length):0;
-  const pm={};
-  dailyLog.forEach(d=>Object.entries(d.byProd||{}).forEach(([name,v])=>{if(!pm[name])pm[name]={name,units:0,total:0};pm[name].units+=v.units;pm[name].total+=v.total;}));
-  const prodList=Object.values(pm).sort((a,b)=>b.total-a.total);
-  const dowMap={};
-  DIAS.forEach(d=>{dowMap[d]={dow:d,count:0,gross:0};});
-  dailyLog.forEach(d=>{if(dowMap[d.dow]){dowMap[d.dow].count++;dowMap[d.dow].gross+=d.gross;}});
-  const dowList=DIAS.map(d=>({dow:d,count:dowMap[d].count,gross:dowMap[d].gross,avg:dowMap[d].count?Math.round(dowMap[d].gross/dowMap[d].count):0}));
-  const maxDow=Math.max(...dowList.map(d=>d.gross),1);
-  const sorted=[...dailyLog].sort((a,b)=>b.gross-a.gross);
-  const best3=sorted.slice(0,3),worst3=sorted.slice(-3).reverse();
-  const bc=(v,max)=>{const p=v/max;return p>=0.75?"#f5c842":p>=0.4?"#60a5fa":"#f87171";};
-  const now2=new Date();
-  const mesLabel=`${MESES[now2.getMonth()]} ${now2.getFullYear()}`;
-  const doExport=()=>exportToExcel(buildMonthlyReport(dailyLog,inventory,monthlyExp),`Reporte_Mensual_${mesLabel}`);
 
   return (
     <div>
