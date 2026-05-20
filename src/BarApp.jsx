@@ -424,7 +424,8 @@ export default function BarApp() {
       <p style={{color:"#555",fontSize:13}}>Conectando con la nube...</p>
     </div>
   );
-  if (!user) return <LoginScreen onLogin={login}/>;
+  const usersReady = fb.users && fb.users.length > 0;
+  if (!user) return <LoginScreen onLogin={login} usersReady={usersReady}/>;
 
   return (
     <div style={{fontFamily:"'DM Sans',system-ui,sans-serif",background:"#09090f",minHeight:"100vh",color:"#e8e0d0"}}>
@@ -1121,9 +1122,12 @@ function TableView({table,inventory,promociones,calc,onAdd,onCloseRound,onEditLa
     </div>
   );
 }
-function LoginScreen({onLogin}){
+function LoginScreen({onLogin, usersReady}){
   const [u,setU]=useState(""); const [p,setP]=useState(""); const [err,setErr]=useState("");
-  const handle=()=>{if(!onLogin(u,p))setErr("Usuario o contraseña incorrectos");};
+  const handle=()=>{
+    if(!usersReady){ setErr("Cargando usuarios, espera..."); return; }
+    if(!onLogin(u,p)) setErr("Usuario o contraseña incorrectos");
+  };
   return (
     <div style={{fontFamily:"'DM Sans',system-ui,sans-serif",background:"#09090f",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{width:320,padding:32,background:"#0e0c18",border:"1px solid rgba(245,200,66,0.2)",borderRadius:20}}>
@@ -1131,11 +1135,14 @@ function LoginScreen({onLogin}){
           <div style={{fontSize:48,marginBottom:8}}>🍹</div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#f5c842",letterSpacing:3,margin:0}}>BAR POS</h1>
           <p style={{color:"#555",fontSize:12,marginTop:4}}>Ingresa tus credenciales</p>
+          {!usersReady && <p style={{color:"#f5c842",fontSize:11,marginTop:6}}>⏳ Conectando con Firebase...</p>}
         </div>
         <input placeholder="Usuario" value={u} onChange={e=>{setU(e.target.value);setErr("");}} style={{...inp,marginBottom:10}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
         <input placeholder="Contraseña" type="password" value={p} onChange={e=>{setP(e.target.value);setErr("");}} style={{...inp,marginBottom:10}} onKeyDown={e=>e.key==="Enter"&&handle()}/>
         {err && <p style={{color:"#f87171",fontSize:12,marginBottom:8,textAlign:"center"}}>{err}</p>}
-        <button onClick={handle} style={{...btnS("amber"),width:"100%",padding:"11px 0",fontSize:14}}>Entrar</button>
+        <button onClick={handle} disabled={!usersReady} style={{...btnS("amber"),width:"100%",padding:"11px 0",fontSize:14,opacity:usersReady?1:0.6}}>
+          {usersReady ? "Entrar" : "⏳ Cargando..."}
+        </button>
       </div>
     </div>
   );
