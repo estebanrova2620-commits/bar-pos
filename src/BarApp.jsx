@@ -207,13 +207,14 @@ export default function BarApp() {
     
     let newItems;
     if(existing){
-      // Acumular cantidad en el item existente
+      // Acumular qty — stockItems guarda qty POR UNIDAD (siempre 1 por unidad)
+      // El descuento real = stockItems[x].qty * item.qty al cerrar ronda
       newItems = currentItems.map(i=>i.id===existing.id 
-        ? {...i, qty:i.qty+1, stockItems:[{name:mi.name, qty:i.qty+1}]}
+        ? {...i, qty:i.qty+1}
         : i
       );
     } else {
-      // Crear nuevo item
+      // Crear nuevo item — stockItems con qty:1 por unidad
       const newItem = {
         id:genId(),
         menuId:mi.id,
@@ -440,6 +441,7 @@ export default function BarApp() {
           <NavBtn k="expenses"   icon="💸"  l="Gastos"     view={view} onClick={()=>nav("expenses")}/>
           <NavBtn k="credits"    icon="📒"  l="Créditos"   view={view} onClick={()=>nav("credits")} color="blue"/>
           {isAdmin && <NavBtn k="inventory"  icon="📦" l="Stock"      view={view} onClick={()=>nav("inventory")}/>}
+          {isAdmin && <NavBtn k="mesas_config" icon="🗺" l="Mesas"   view={view} onClick={()=>nav("mesas_config")} color="blue"/>}
           {isAdmin && <NavBtn k="promociones" icon="🪣" l="Promociones" view={view} onClick={()=>nav("promociones")} color="purple"/>}
           {isAdmin && <NavBtn k="monthly"    icon="📊" l="Mes"        view={view} onClick={()=>nav("monthly")} color="purple"/>}
           {isAdmin && <NavBtn k="users"      icon="👥" l="Usuarios"   view={view} onClick={()=>nav("users")} color="blue"/>}
@@ -475,6 +477,7 @@ export default function BarApp() {
           onClose={()=>closeTable(activeId)}
           onBack={()=>{setView("floor");setActiveId(null);}}
         />}
+        {view==="mesas_config" && isAdmin && <MesasConfigView tables={tables} saveTable={saveTable} onBack={()=>nav("floor")}/>}
         {view==="expenses"              && <ExpensesView expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} monthlyExp={monthlyExp} addMonthlyExp={addMonthlyExp} deleteMonthlyExp={deleteMonthlyExp} audit={audit} isAdmin={isAdmin}/>}
         {view==="inventory" && isAdmin  && <InventoryView inventory={inventory} saveInventoryItem={saveInventoryItem} deleteInventoryItem={deleteInventoryItem} categories={categories} saveCategories={saveCategories} audit={audit}/>}
         {view==="promociones" && isAdmin && <PromocionesView promociones={promociones} inventory={inventory} savePromocion={savePromocion} deletePromocion={deletePromocion} togglePromocion={togglePromocion} audit={audit}/>}
@@ -834,9 +837,10 @@ function TableView({table,inventory,promociones,calc,onAdd,onCloseRound,onEditLa
   // Menu = inventario con stock > 0, más promociones activas
   const catOrder = ["Cervezas","Aguardiente","Bebidas","Micheladas","Snacks"];
   const visibleInv = inventory.filter(m=>{
-    if(m.cat==="Cubetazos") return false; // cubetazos solo por Promociones
+    if(m.cat==="Cubetazos") return false;
     if(!m.price || m.price<=0) return false;
     if(m.stock<=0) return false;
+    if(m.active===false) return false; // productos inactivos no aparecen en mesa
     return true;
   });
   const promosActivas = (promociones||[]).filter(p=>p.activo);
@@ -1122,6 +1126,119 @@ function TableView({table,inventory,promociones,calc,onAdd,onCloseRound,onEditLa
     </div>
   );
 }
+// ═══════════════════════════════════════════════════════════════
+// MESAS CONFIG VIEW — Crear, editar posición y eliminar mesas
+// ═══════════════════════════════════════════════════════════════
+function MesasConfigView({tables, saveTable, onBack}){
+  const TABLE_IDS_ALL = Object.keys(tables).sort();
+  const [showNew, setShowNew] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [editPos, setEditPos] = useState(null); // id de mesa editando posición
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const mesasAbiertas = TABLE_IDS_ALL.filter(id => tables[id]?.status === "open");
+
+  const crearMesa = () => {
+    if(!newLabel.trim()) return;
+    const newId = "T" + (Date.now());
+    saveTable(newId, {
+      id: newId, label: newLabel.trim(), status:"free",
+      rounds:[], discount:0, payments:[], openedAt:null, openedBy:null, sessions:[]
+    });
+    setNewLabel(""); setShowNew(false);
+  };
+
+  const eliminarMesa = (id) => {
+    if(tables[id]?.status === "open") return;
+    // Marcar como eliminada — no se puede borrar doc de Firebase fácilmente desde aquí
+    // La marcamos con status "deleted" para ocultarla
+    saveTable(id, {...tables[id], deleted:true});
+    setConfirmDel(null);
+  };
+
+  const mesasVisibles = TABLE_IDS_ALL.filter(id => !tables[id]?.deleted);
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:"#666",fontSize:22,cursor:"pointer"}}>←</button>
+        <div style={{flex:1}}>
+          <h2 style={{margin:0,fontSize:18,color:"#60a5fa"}}>🗺 Gestión de Mesas</h2>
+          <p style={{margin:0,fontSize:11,color:"#555"}}>{mesasVisibles.length} mesas configuradas</p>
+        </div>
+        <button onClick={()=>setShowNew(!showNew)} style={btnS("blue")}>+ Nueva mesa</button>
+      </div>
+
+      {showNew && (
+        <div style={{padding:14,background:"rgba(96,165,250,0.06)",border:"1px solid rgba(96,165,250,0.25)",borderRadius:13,marginBottom:14}}>
+          <p style={{fontSize:12,color:"#60a5fa",fontWeight:700,marginBottom:10}}>➕ Nueva mesa</p>
+          <input placeholder="Número o nombre de la mesa (ej: 12, Terraza, VIP)" value={newLabel} onChange={e=>setNewLabel(e.target.value)} style={{...inp,marginBottom:10}}
+            onKeyDown={e=>e.key==="Enter"&&crearMesa()}/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setShowNew(false)} style={{...btnS("ghost"),flex:1,padding:"9px 0"}}>Cancelar</button>
+            <button onClick={crearMesa} disabled={!newLabel.trim()} style={{...btnS("blue"),flex:1,padding:"9px 0",opacity:newLabel.trim()?1:0.5}}>Crear mesa</button>
+          </div>
+        </div>
+      )}
+
+      {mesasAbiertas.length>0 && (
+        <div style={{padding:"9px 12px",background:"rgba(248,113,113,0.07)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:10,marginBottom:12,fontSize:12,color:"#f87171"}}>
+          ⚠ Las mesas abiertas no se pueden eliminar: {mesasAbiertas.map(id=>tables[id]?.label).join(", ")}
+        </div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {mesasVisibles.map(id=>{
+          const mesa = tables[id];
+          const isOpen = mesa?.status === "open";
+          return (
+            <div key={id} style={{padding:"12px 14px",background:"rgba(255,255,255,0.03)",border:`1px solid ${isOpen?"rgba(245,200,66,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:12,display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:40,height:40,borderRadius:10,background:isOpen?"rgba(245,200,66,0.1)":"rgba(255,255,255,0.05)",border:`1px solid ${isOpen?"rgba(245,200,66,0.4)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:isOpen?"#f5c842":"#888"}}>
+                {mesa?.label}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,color:"#e8e0d0",fontWeight:600}}>Mesa {mesa?.label}</div>
+                <div style={{fontSize:11,color:isOpen?"#f5c842":"#555"}}>{isOpen?"● Abierta":"● Libre"} · ID: {id}</div>
+              </div>
+              {editPos===id ? (
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <input defaultValue={mesa?.label} id={`label_${id}`} style={{...inp,width:80,padding:"5px 8px",fontSize:12}}/>
+                  <button onClick={()=>{
+                    const newLbl = document.getElementById(`label_${id}`)?.value?.trim();
+                    if(newLbl) { saveTable(id,{...mesa,label:newLbl}); }
+                    setEditPos(null);
+                  }} style={{...btnS("blue"),padding:"5px 10px",fontSize:11}}>✓</button>
+                  <button onClick={()=>setEditPos(null)} style={{...btnS("ghost"),padding:"5px 10px",fontSize:11}}>✕</button>
+                </div>
+              ) : (
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>setEditPos(id)} style={{...btnS("ghost"),padding:"6px 10px",fontSize:12}}>✏️ Editar</button>
+                  {!isOpen && (
+                    <button onClick={()=>setConfirmDel(id)} style={{...btnS("red"),padding:"6px 10px",fontSize:12}}>🗑</button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {confirmDel && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:20}}>
+          <div style={{background:"#12101c",border:"1px solid rgba(248,113,113,0.35)",borderRadius:16,padding:24,maxWidth:300,width:"100%"}}>
+            <p style={{textAlign:"center",color:"#f87171",fontWeight:700,fontSize:16,marginBottom:8}}>¿Eliminar mesa {tables[confirmDel]?.label}?</p>
+            <p style={{textAlign:"center",color:"#666",fontSize:12,marginBottom:20}}>Esta acción no se puede deshacer.</p>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setConfirmDel(null)} style={{...btnS("ghost"),flex:1,padding:"9px 0"}}>Cancelar</button>
+              <button onClick={()=>eliminarMesa(confirmDel)} style={{...btnS("red"),flex:1,padding:"9px 0"}}>Eliminar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LoginScreen({onLogin, usersReady}){
   const [u,setU]=useState(""); const [p,setP]=useState(""); const [err,setErr]=useState("");
   const handle=()=>{
@@ -1186,8 +1303,8 @@ function StartDayView({onStart,onBack,dayOp}){
 
 function FloorView({tables,layout,calc,dayOp,onSelect,onOpenAndSelect}){
   const [confirm,setConfirm]=useState(null);
-  const openCount=Object.values(tables).filter(t=>t.status==="open").length;
-  const totalPending=Object.values(tables).filter(t=>t.status==="open").reduce((s,t)=>s+calc(t).pending,0);
+  const openCount=Object.values(tables).filter(t=>t.status==="open"&&!t.deleted).length;
+  const totalPending=Object.values(tables).filter(t=>t.status==="open"&&!t.deleted).reduce((s,t)=>s+calc(t).pending,0);
   const sc={free:{fill:"rgba(255,255,255,0.03)",stroke:"rgba(255,255,255,0.14)",text:"#444"},open:{fill:"rgba(245,200,66,0.1)",stroke:"rgba(245,200,66,0.55)",text:"#f5c842"},paid:{fill:"rgba(52,211,153,0.08)",stroke:"rgba(52,211,153,0.4)",text:"#34d399"}};
   return (
     <div>
@@ -1254,10 +1371,14 @@ function InventoryView({inventory,saveInventoryItem,deleteInventoryItem,categori
   const mc=pct=>pct===null?"#555":pct>=40?"#34d399":pct>=20?"#f5c842":"#f87171";
   const save=()=>{
     if(!form.name) return;
-    const item={...form,stock:+form.stock,min:+form.min,cost:+form.cost,price:+form.price};
+    const item={...form,stock:+form.stock,min:+form.min,cost:+form.cost,price:+form.price,active:true};
     if(editId){saveInventoryItem({...inventory.find(x=>x.id===editId),...item});audit("Editar inventario",form.name);setEditId(null);}
     else{saveInventoryItem({...item,id:genId()});audit("Agregar inventario",form.name);}
     setForm({name:"",cat:"",stock:"",min:"",unit:"und.",cost:"",price:""});setShow(false);
+  };
+  const toggleActive=(item)=>{
+    saveInventoryItem({...item,active:item.active===false?true:false});
+    audit(item.active===false?"Activar producto":"Desactivar producto",item.name);
   };
   const startEdit=item=>{setForm({name:item.name,cat:item.cat,stock:item.stock,min:item.min,unit:item.unit,cost:item.cost,price:item.price||""});setEditId(item.id);setShow(true);};
   const addStock=id=>{const qty=parseInt(addQtys[id]||0);if(!qty||qty<=0)return;const foundItem=inventory.find(i=>i.id===id);if(foundItem){saveInventoryItem({...foundItem,stock:foundItem.stock+qty});audit("Carga stock",`${foundItem.name} +${qty}`);}setAddQtys(q=>({...q,[id]:""}));};
@@ -1318,7 +1439,11 @@ function InventoryView({inventory,saveInventoryItem,deleteInventoryItem,categori
             <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:8}}>
               <div style={{flex:1}}><div style={{fontSize:13,color:"#e8e0d0",fontWeight:600}}>{item.name}</div><div style={{fontSize:11,color:"#555"}}>{item.cat}</div></div>
               <div style={{textAlign:"center",minWidth:52}}><div style={{fontSize:18,fontWeight:800,color:low?"#f87171":"#34d399",lineHeight:1}}>{item.stock}</div><div style={{fontSize:9,color:"#444"}}>{item.unit} · mín {item.min}</div></div>
+              <div style={{display:"flex",gap:4}}>
+              <button onClick={()=>toggleActive(item)} style={{background:item.active===false?"rgba(248,113,113,0.1)":"rgba(52,211,153,0.1)",border:`1px solid ${item.active===false?"rgba(248,113,113,0.3)":"rgba(52,211,153,0.3)"}`,borderRadius:7,color:item.active===false?"#f87171":"#34d399",cursor:"pointer",padding:"3px 8px",fontSize:11}}>{item.active===false?"Inactivo":"Activo"}</button>
               <button onClick={()=>startEdit(item)} style={{background:"none",border:"1px solid rgba(255,255,255,0.1)",borderRadius:7,color:"#666",cursor:"pointer",padding:"3px 8px",fontSize:12}}>✏️</button>
+              <button onClick={()=>{if(window.confirm(`¿Eliminar ${item.name}?`)){deleteInventoryItem(item.id);audit("Eliminar producto",item.name);}}} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.3)",borderRadius:7,color:"#f87171",cursor:"pointer",padding:"3px 8px",fontSize:12}}>🗑</button>
+            </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:9}}>
               {[{l:"COSTO",v:fmt(item.cost||0),c:"#e8e0d0"},{l:"PRECIO VENTA",v:fmt(item.price||0),c:"#f5c842"},{l:"MARGEN",v:mg!==null?`${mg}%`:"—",c:mc(mg)}].map(s=>(
