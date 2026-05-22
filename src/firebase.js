@@ -1,21 +1,13 @@
-// src/firebase.js
-// ─────────────────────────────────────────────────────────────────
-// INSTRUCCIONES:
-// 1. Ve a firebase.google.com → tu proyecto → ⚙️ Configuración
-// 2. Baja a "Tus apps" → la app web que creaste
-// 3. Copia los valores de firebaseConfig y pégalos aquí abajo
-// ─────────────────────────────────────────────────────────────────
-
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey:            "PEGA_AQUI_TU_apiKey",
-  authDomain:        "PEGA_AQUI_TU_authDomain",
-  projectId:         "PEGA_AQUI_TU_projectId",
-  storageBucket:     "PEGA_AQUI_TU_storageBucket",
-  messagingSenderId: "PEGA_AQUI_TU_messagingSenderId",
-  appId:             "PEGA_AQUI_TU_appId",
+  apiKey: "AIzaSyBfwpjvEXQpGQlDbsHOyUuS0D6otPhPX04",
+  authDomain: "bar-pos-53d13.firebaseapp.com",
+  projectId: "bar-pos-53d13",
+  storageBucket: "bar-pos-53d13.firebasestorage.app",
+  messagingSenderId: "745120446362",
+  appId: "1:745120446362:web:4cd3a8d2ae472950852c23"
 };
 
 const app = initializeApp(firebaseConfig);
