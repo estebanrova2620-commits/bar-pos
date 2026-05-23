@@ -1166,9 +1166,15 @@ function MesasConfigView({tables, saveTable, onBack}){
     setConfirmDel(null);
   };
 
-  // Separar mesas originales de mesas nuevas creadas
-  const mesasOriginales = TABLE_IDS_ALL.filter(id => id.match(/^T\d{1,2}$/) && !tables[id]?.deleted);
-  const mesasNuevas = TABLE_IDS_ALL.filter(id => id.match(/^T\d{10,}$/) && !tables[id]?.deleted);
+  // Todas las mesas no eliminadas
+  const mesasOriginales = TABLE_IDS_ALL.filter(id => {
+    const t = tables[id];
+    return t && !t.deleted && id.length <= 4; // T1..T11
+  });
+  const mesasNuevas = TABLE_IDS_ALL.filter(id => {
+    const t = tables[id];
+    return t && !t.deleted && id.length > 4; // T1748... timestamp IDs
+  });
   const mesasVisibles = [...mesasOriginales, ...mesasNuevas];
 
   return (
@@ -1202,14 +1208,19 @@ function MesasConfigView({tables, saveTable, onBack}){
 
       {mesasNuevas.length>0 && (
         <div style={{padding:"8px 12px",background:"rgba(52,211,153,0.06)",border:"1px solid rgba(52,211,153,0.2)",borderRadius:10,marginBottom:10,fontSize:12,color:"#34d399"}}>
-          ✅ {mesasNuevas.length} mesa(s) nueva(s) creada(s) — aparecen en el plano en posición central, arrástralas donde quieras
+          ✅ {mesasNuevas.length} mesa(s) nueva(s) — ve al plano y arrástralas donde quieras
         </div>
       )}
+      {/* Debug: mostrar total de mesas en Firebase */}
+      <div style={{padding:"6px 10px",background:"rgba(255,255,255,0.03)",borderRadius:8,marginBottom:8,fontSize:11,color:"#555"}}>
+        Total en Firebase: {Object.keys(tables).length} · Visibles: {mesasVisibles.length} · 
+        Con deleted: {Object.values(tables).filter(t=>t?.deleted||t?.status==="deleted").length}
+      </div>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {mesasVisibles.map(id=>{
           const mesa = tables[id];
           const isOpen = mesa?.status === "open";
-          const isNueva = id.match(/^T\d{10,}$/);
+          const isNueva = id.length > 4;
           return (
             <div key={id} style={{padding:"12px 14px",background:isNueva?"rgba(52,211,153,0.04)":"rgba(255,255,255,0.03)",border:`1px solid ${isOpen?"rgba(245,200,66,0.3)":isNueva?"rgba(52,211,153,0.25)":"rgba(255,255,255,0.08)"}`,borderRadius:12,display:"flex",alignItems:"center",gap:10}}>
               <div style={{width:40,height:40,borderRadius:10,background:isOpen?"rgba(245,200,66,0.1)":isNueva?"rgba(52,211,153,0.1)":"rgba(255,255,255,0.05)",border:`1px solid ${isOpen?"rgba(245,200,66,0.4)":isNueva?"rgba(52,211,153,0.3)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:isOpen?"#f5c842":isNueva?"#34d399":"#888"}}>
@@ -1326,7 +1337,12 @@ function FloorView({tables,calc,dayOp,onSelect,onOpenAndSelect,saveTable,isAdmin
   const [dragOffset,setDragOffset]=useState({x:0,y:0});
   const svgRef = useState(null);
 
-  const mesasVisibles = Object.values(tables).filter(t=>t&&!t.deleted);
+  const mesasVisibles = Object.values(tables).filter(t=>{
+    if(!t) return false;
+    if(t.deleted===true) return false;
+    if(t.status==="deleted") return false;
+    return true;
+  });
   const openCount=mesasVisibles.filter(t=>t.status==="open").length;
   const totalPending=mesasVisibles.filter(t=>t.status==="open").reduce((s,t)=>s+calc(t).pending,0);
   const sc={free:{fill:"rgba(255,255,255,0.03)",stroke:"rgba(255,255,255,0.14)",text:"#444"},open:{fill:"rgba(245,200,66,0.1)",stroke:"rgba(245,200,66,0.55)",text:"#f5c842"},paid:{fill:"rgba(52,211,153,0.08)",stroke:"rgba(52,211,153,0.4)",text:"#34d399"}};
