@@ -77,12 +77,15 @@ export function useFirebaseData() {
       mark("config");
     }));
 
-    // ── Mesas ─────────────────────────────────────────────────
-    TABLE_IDS.forEach(id=>{
-      unsubs.push(onSnapshot(doc(db,"tables",id), snap=>{
-        setTables(prev=>({...prev,[id]: snap.exists() ? snap.data() : emptyTable(id)}));
-      }));
-    });
+   // ── Mesas ─────────────────────────────────────────────────
+unsubs.push(onSnapshot(collection(db,"tables"), snap=>{
+  const all = {};
+  snap.docs.forEach(d=>{ all[d.id] = d.data(); });
+  TABLE_IDS.forEach(id=>{
+    if(!all[id]) all[id] = emptyTable(id);
+  });
+  setTables(all);
+}));
 
     // ── Inventario — NUNCA inicializa, solo lee ───────────────
     // SIN lógica de inicialización — los datos siempre vienen de Firebase
