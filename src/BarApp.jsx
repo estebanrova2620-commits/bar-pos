@@ -1130,7 +1130,11 @@ function TableView({table,inventory,promociones,calc,onAdd,onCloseRound,onEditLa
 // MESAS CONFIG VIEW — Crear, editar posición y eliminar mesas
 // ═══════════════════════════════════════════════════════════════
 function MesasConfigView({tables, saveTable, onBack}){
-  const TABLE_IDS_ALL = Object.keys(tables).sort();
+  const TABLE_IDS_ALL = Object.keys(tables).sort((a,b)=>{
+    const numA = parseInt(a.replace("T",""))||0;
+    const numB = parseInt(b.replace("T",""))||0;
+    return numA - numB;
+  });
   const [showNew, setShowNew] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [editPos, setEditPos] = useState(null); // id de mesa editando posición
@@ -1138,27 +1142,34 @@ function MesasConfigView({tables, saveTable, onBack}){
 
   const mesasAbiertas = TABLE_IDS_ALL.filter(id => tables[id]?.status === "open");
 
-  const crearMesa = () => {
-    if(!newLabel.trim()) return;
-    const newId = "T" + (Date.now());
-    // Posición inicial en centro del plano
-    saveTable(newId, {
-      id: newId, label: newLabel.trim(), status:"free",
-      rounds:[], discount:0, payments:[], openedAt:null, openedBy:null, sessions:[],
-      posX: 50, posY: 40
-    });
-    setNewLabel(""); setShowNew(false);
+  const [creating, setCreating] = useState(false);
+  const crearMesa = async() => {
+    if(!newLabel.trim() || creating) return;
+    setCreating(true);
+    try {
+      const newId = "T" + Date.now();
+      await saveTable(newId, {
+        id: newId, label: newLabel.trim(), status:"free",
+        rounds:[], discount:0, payments:[], openedAt:null, openedBy:null, sessions:[],
+        posX: 50, posY: 40
+      });
+      setNewLabel(""); setShowNew(false);
+    } catch(e) {
+      alert("Error al crear mesa: " + e.message);
+    }
+    setCreating(false);
   };
 
-  const eliminarMesa = (id) => {
+  const eliminarMesa = async(id) => {
     if(tables[id]?.status === "open") return;
-    // Marcar como eliminada — no se puede borrar doc de Firebase fácilmente desde aquí
-    // La marcamos con status "deleted" para ocultarla
-    saveTable(id, {...tables[id], deleted:true});
+    await saveTable(id, {...tables[id], deleted:true, status:"deleted"});
     setConfirmDel(null);
   };
 
-  const mesasVisibles = TABLE_IDS_ALL.filter(id => !tables[id]?.deleted);
+  // Separar mesas originales de mesas nuevas creadas
+  const mesasOriginales = TABLE_IDS_ALL.filter(id => id.match(/^T\d{1,2}$/) && !tables[id]?.deleted);
+  const mesasNuevas = TABLE_IDS_ALL.filter(id => id.match(/^T\d{10,}$/) && !tables[id]?.deleted);
+  const mesasVisibles = [...mesasOriginales, ...mesasNuevas];
 
   return (
     <div>
@@ -1178,7 +1189,7 @@ function MesasConfigView({tables, saveTable, onBack}){
             onKeyDown={e=>e.key==="Enter"&&crearMesa()}/>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>setShowNew(false)} style={{...btnS("ghost"),flex:1,padding:"9px 0"}}>Cancelar</button>
-            <button onClick={crearMesa} disabled={!newLabel.trim()} style={{...btnS("blue"),flex:1,padding:"9px 0",opacity:newLabel.trim()?1:0.5}}>Crear mesa</button>
+            <button onClick={crearMesa} disabled={!newLabel.trim()||creating} style={{...btnS("blue"),flex:1,padding:"9px 0",opacity:newLabel.trim()&&!creating?1:0.5}}>{creating?"Creando...":"Crear mesa"}</button>
           </div>
         </div>
       )}
@@ -1189,13 +1200,19 @@ function MesasConfigView({tables, saveTable, onBack}){
         </div>
       )}
 
+      {mesasNuevas.length>0 && (
+        <div style={{padding:"8px 12px",background:"rgba(52,211,153,0.06)",border:"1px solid rgba(52,211,153,0.2)",borderRadius:10,marginBottom:10,fontSize:12,color:"#34d399"}}>
+          ✅ {mesasNuevas.length} mesa(s) nueva(s) creada(s) — aparecen en el plano en posición central, arrástralas donde quieras
+        </div>
+      )}
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {mesasVisibles.map(id=>{
           const mesa = tables[id];
           const isOpen = mesa?.status === "open";
+          const isNueva = id.match(/^T\d{10,}$/);
           return (
-            <div key={id} style={{padding:"12px 14px",background:"rgba(255,255,255,0.03)",border:`1px solid ${isOpen?"rgba(245,200,66,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:12,display:"flex",alignItems:"center",gap:10}}>
-              <div style={{width:40,height:40,borderRadius:10,background:isOpen?"rgba(245,200,66,0.1)":"rgba(255,255,255,0.05)",border:`1px solid ${isOpen?"rgba(245,200,66,0.4)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:isOpen?"#f5c842":"#888"}}>
+            <div key={id} style={{padding:"12px 14px",background:isNueva?"rgba(52,211,153,0.04)":"rgba(255,255,255,0.03)",border:`1px solid ${isOpen?"rgba(245,200,66,0.3)":isNueva?"rgba(52,211,153,0.25)":"rgba(255,255,255,0.08)"}`,borderRadius:12,display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:40,height:40,borderRadius:10,background:isOpen?"rgba(245,200,66,0.1)":isNueva?"rgba(52,211,153,0.1)":"rgba(255,255,255,0.05)",border:`1px solid ${isOpen?"rgba(245,200,66,0.4)":isNueva?"rgba(52,211,153,0.3)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:isOpen?"#f5c842":isNueva?"#34d399":"#888"}}>
                 {mesa?.label}
               </div>
               <div style={{flex:1}}>
