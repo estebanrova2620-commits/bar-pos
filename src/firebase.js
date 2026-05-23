@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBfwpjvEXQpGQlDbsHOyUuS0D6otPhPX04",
@@ -12,3 +12,15 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+
+// Persistencia offline — guarda datos localmente
+// Si se va el internet, sigue funcionando y sincroniza al volver
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code === 'failed-precondition') {
+    // Múltiples pestañas abiertas — solo funciona en una
+    console.warn("Persistencia offline: cierra otras pestañas del Bar POS");
+  } else if (err.code === 'unimplemented') {
+    // El navegador no soporta persistencia offline
+    console.warn("Este navegador no soporta modo offline");
+  }
+});
