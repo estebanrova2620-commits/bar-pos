@@ -460,7 +460,7 @@ export default function BarApp() {
 
       <div style={{padding:14,maxWidth:700,margin:"0 auto"}}>
         {view==="startday"    && <StartDayView onStart={(base)=>{startDay(base);nav("floor");}} onBack={()=>nav("floor")} dayOp={dayOp}/>}
-        {view==="floor"       && <FloorView tables={tables} layout={LAYOUT} calc={calc} dayOp={dayOp} onSelect={id=>{setActiveId(id);setView("table");}} onOpenAndSelect={id=>{openTable(id);setActiveId(id);setView("table");}}/>}
+        {view==="floor"       && <FloorView tables={tables} calc={calc} dayOp={dayOp} isAdmin={isAdmin} saveTable={saveTable} onSelect={id=>{setActiveId(id);setView("table");}} onOpenAndSelect={id=>{openTable(id);setActiveId(id);setView("table");}}/>}
         {view==="table" && activeId && <TableView
           table={tables[activeId]} tableId={activeId}
           inventory={inventory}
@@ -1141,9 +1141,11 @@ function MesasConfigView({tables, saveTable, onBack}){
   const crearMesa = () => {
     if(!newLabel.trim()) return;
     const newId = "T" + (Date.now());
+    // Posición inicial en centro del plano
     saveTable(newId, {
       id: newId, label: newLabel.trim(), status:"free",
-      rounds:[], discount:0, payments:[], openedAt:null, openedBy:null, sessions:[]
+      rounds:[], discount:0, payments:[], openedAt:null, openedBy:null, sessions:[],
+      posX: 50, posY: 40
     });
     setNewLabel(""); setShowNew(false);
   };
@@ -1301,11 +1303,94 @@ function StartDayView({onStart,onBack,dayOp}){
   );
 }
 
-function FloorView({tables,layout,calc,dayOp,onSelect,onOpenAndSelect}){
+function FloorView({tables,calc,dayOp,onSelect,onOpenAndSelect,saveTable,isAdmin}){
   const [confirm,setConfirm]=useState(null);
-  const openCount=Object.values(tables).filter(t=>t.status==="open"&&!t.deleted).length;
-  const totalPending=Object.values(tables).filter(t=>t.status==="open"&&!t.deleted).reduce((s,t)=>s+calc(t).pending,0);
+  const [dragging,setDragging]=useState(null);
+  const [dragOffset,setDragOffset]=useState({x:0,y:0});
+  const svgRef = useState(null);
+
+  const mesasVisibles = Object.values(tables).filter(t=>t&&!t.deleted);
+  const openCount=mesasVisibles.filter(t=>t.status==="open").length;
+  const totalPending=mesasVisibles.filter(t=>t.status==="open").reduce((s,t)=>s+calc(t).pending,0);
   const sc={free:{fill:"rgba(255,255,255,0.03)",stroke:"rgba(255,255,255,0.14)",text:"#444"},open:{fill:"rgba(245,200,66,0.1)",stroke:"rgba(245,200,66,0.55)",text:"#f5c842"},paid:{fill:"rgba(52,211,153,0.08)",stroke:"rgba(52,211,153,0.4)",text:"#34d399"}};
+
+  // Posiciones: usa posX/posY guardados en la mesa, o posición por defecto
+  const DEFAULT_POSITIONS = {
+    T1:{x:70,y:50},T2:{x:96,y:28},T3:{x:70,y:28},T4:{x:48,y:28},
+    T5:{x:4,y:50},T6:{x:26,y:50},T7:{x:4,y:28},T8:{x:26,y:28},
+    T9:{x:4,y:6},T10:{x:48,y:50},T11:{x:4,y:72}
+  };
+
+  const getPos = (t) => ({
+    x: t.posX !== undefined ? t.posX : (DEFAULT_POSITIONS[t.id]?.x ?? 50),
+    y: t.posY !== undefined ? t.posY : (DEFAULT_POSITIONS[t.id]?.y ?? 50),
+  });
+
+  const handleMouseDown = (e, tid) => {
+    if(!isAdmin) return;
+    e.preventDefault();
+    const svgEl = document.getElementById("floor-svg");
+    if(!svgEl) return;
+    const rect = svgEl.getBoundingClientRect();
+    const scaleX = 120 / rect.width;
+    const scaleY = 95 / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    const pos = getPos(tables[tid]);
+    setDragging(tid);
+    setDragOffset({x: mx - pos.x, y: my - pos.y});
+  };
+
+  const handleMouseMove = (e) => {
+    if(!dragging) return;
+    e.preventDefault();
+    const svgEl = document.getElementById("floor-svg");
+    if(!svgEl) return;
+    const rect = svgEl.getBoundingClientRect();
+    const scaleX = 120 / rect.width;
+    const scaleY = 95 / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    const newX = Math.max(1, Math.min(100, mx - dragOffset.x));
+    const newY = Math.max(1, Math.min(78, my - dragOffset.y));
+    const t = tables[dragging];
+    saveTable(dragging, {...t, posX: Math.round(newX), posY: Math.round(newY)});
+  };
+
+  const handleMouseUp = () => { setDragging(null); };
+
+  const handleTouchStart = (e, tid) => {
+    if(!isAdmin) return;
+    const touch = e.touches[0];
+    const svgEl = document.getElementById("floor-svg");
+    if(!svgEl) return;
+    const rect = svgEl.getBoundingClientRect();
+    const scaleX = 120 / rect.width;
+    const scaleY = 95 / rect.height;
+    const mx = (touch.clientX - rect.left) * scaleX;
+    const my = (touch.clientY - rect.top) * scaleY;
+    const pos = getPos(tables[tid]);
+    setDragging(tid);
+    setDragOffset({x: mx - pos.x, y: my - pos.y});
+  };
+
+  const handleTouchMove = (e) => {
+    if(!dragging) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const svgEl = document.getElementById("floor-svg");
+    if(!svgEl) return;
+    const rect = svgEl.getBoundingClientRect();
+    const scaleX = 120 / rect.width;
+    const scaleY = 95 / rect.height;
+    const mx = (touch.clientX - rect.left) * scaleX;
+    const my = (touch.clientY - rect.top) * scaleY;
+    const newX = Math.max(1, Math.min(100, mx - dragOffset.x));
+    const newY = Math.max(1, Math.min(78, my - dragOffset.y));
+    const t = tables[dragging];
+    saveTable(dragging, {...t, posX: Math.round(newX), posY: Math.round(newY)});
+  };
+
   return (
     <div>
       <div style={{display:"flex",gap:10,marginBottom:14}}>
@@ -1316,23 +1401,41 @@ function FloorView({tables,layout,calc,dayOp,onSelect,onOpenAndSelect}){
           </div>
         ))}
       </div>
-      <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:10,marginBottom:10}}>
-        <p style={{fontSize:10,color:"#444",textAlign:"center",letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>Plano del bar — toca una mesa</p>
-        <svg viewBox="0 0 120 95" style={{width:"100%",maxHeight:380}}>
+      {isAdmin && <p style={{fontSize:10,color:"#555",textAlign:"center",marginBottom:6}}>✋ Mantén presionada una mesa para moverla</p>}
+      <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:10,marginBottom:10,touchAction:"none"}}>
+        <svg id="floor-svg" viewBox="0 0 120 95" style={{width:"100%",maxHeight:400,display:"block"}}
+          onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+          onTouchMove={handleTouchMove} onTouchEnd={handleMouseUp}>
           <rect x="1" y="1" width="118" height="90" rx="2" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="0.6"/>
           <rect x="28" y="4" width="52" height="12" rx="2" fill="rgba(245,200,66,0.08)" stroke="rgba(245,200,66,0.35)" strokeWidth="0.6"/>
           <text x="54" y="10.5" fontSize="3.5" fill="rgba(245,200,66,0.6)" textAnchor="middle" dominantBaseline="middle" fontWeight="600">B A R R A</text>
-          {layout.map(tl=>{
-            const t=tables[tl.id],s=sc[t?.status||"free"],c=t?.status==="open"?calc(t):null;
-            const rounds=(t?.rounds||[]).length;
+          {mesasVisibles.map(t=>{
+            const pos = getPos(t);
+            const s = sc[t.status||"free"];
+            const c = t.status==="open" ? calc(t) : null;
+            const rounds = (t.rounds||[]).length;
+            const isDragging = dragging===t.id;
+            const W=16, H=13;
             return (
-              <g key={tl.id} onClick={()=>t?.status==="free"?setConfirm(tl.id):onSelect(tl.id)} style={{cursor:"pointer"}}>
-                <rect x={tl.x} y={tl.y} width={tl.w} height={tl.h} rx="2" fill={s.fill} stroke={s.stroke} strokeWidth="0.8"/>
-                <text x={tl.x+tl.w/2} y={tl.y+tl.h/2-2} fontSize="5" fontWeight="700" fill={s.text} textAnchor="middle" dominantBaseline="middle">{tl.label}</text>
-                {t?.status==="open"&&c&&c.pending>0&&(<text x={tl.x+tl.w/2} y={tl.y+tl.h-2.5} fontSize="2.3" fill="#f87171" textAnchor="middle">{fmt(c.pending).replace("COP","").trim()}</text>)}
-                {t?.status==="open"&&rounds>0&&(<text x={tl.x+tl.w-1} y={tl.y+2} fontSize="2" fill="rgba(245,200,66,0.7)" textAnchor="end">R{rounds}</text>)}
-                {t?.status==="free"&&(<text x={tl.x+tl.w/2} y={tl.y+tl.h-2} fontSize="2.2" fill="#333" textAnchor="middle">libre</text>)}
-                {tl.zone==="exterior"&&(<text x={tl.x+tl.w/2} y={tl.y-1.5} fontSize="2" fill="#444" textAnchor="middle">ext.</text>)}
+              <g key={t.id}
+                onMouseDown={e=>handleMouseDown(e,t.id)}
+                onTouchStart={e=>handleTouchStart(e,t.id)}
+                onClick={()=>{ if(isDragging) return; t.status==="free"?setConfirm(t.id):onSelect(t.id); }}
+                style={{cursor:isAdmin?"grab":"pointer",userSelect:"none"}}>
+                <rect x={pos.x} y={pos.y} width={W} height={H} rx="2"
+                  fill={isDragging?"rgba(245,200,66,0.2)":s.fill}
+                  stroke={isDragging?"#f5c842":s.stroke}
+                  strokeWidth={isDragging?"1.2":"0.8"}/>
+                <text x={pos.x+W/2} y={pos.y+H/2-2} fontSize="5" fontWeight="700" fill={isDragging?"#f5c842":s.text} textAnchor="middle" dominantBaseline="middle">{t.label}</text>
+                {t.status==="open"&&c&&c.pending>0&&(
+                  <text x={pos.x+W/2} y={pos.y+H-2.5} fontSize="2.3" fill="#f87171" textAnchor="middle">{fmt(c.pending).replace("COP","").replace(/\s/g,"")}</text>
+                )}
+                {t.status==="open"&&rounds>0&&(
+                  <text x={pos.x+W-1} y={pos.y+2} fontSize="2" fill="rgba(245,200,66,0.7)" textAnchor="end">R{rounds}</text>
+                )}
+                {t.status==="free"&&(
+                  <text x={pos.x+W/2} y={pos.y+H-2} fontSize="2.2" fill="#333" textAnchor="middle">libre</text>
+                )}
               </g>
             );
           })}
