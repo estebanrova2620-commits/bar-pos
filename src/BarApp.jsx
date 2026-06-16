@@ -6,6 +6,8 @@ import { db } from "./firebase";
 const fmt = (n) => new Intl.NumberFormat("es-CO",{style:"currency",currency:"COP",maximumFractionDigits:0}).format(n||0);
 const genId = () => Math.random().toString(36).slice(2,9);
 const now = () => new Date().toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});
+// Parseo robusto de dinero: "4.000" → 4000, "85,000" → 85000, "$12.500" → 12500
+const parseMoney = v => Number(String(v??"").replace(/[^\d-]/g,""))||0;
 const today = () => {
   const d = new Date();
   const y = d.getFullYear();
@@ -219,7 +221,7 @@ export default function BarApp() {
         id:genId(),
         menuId:mi.id,
         name:mi.name,
-        price:mi.price,
+        price:Number(mi.price)||0,
         qty:1,
         paid:false,
         payMethod:null,
@@ -268,7 +270,8 @@ export default function BarApp() {
 
   // ── Editar ítem en ÚLTIMA ronda cerrada ───────────────────────
   const editLastRoundItem = async(tid, iid, newItem) => {
-    const t=tables[tid];
+    const snap=await getDoc(doc(db,"tables",tid));
+    const t=snap.exists()?snap.data():tables[tid];
     const rounds=[...(t.rounds||[])];
     // Buscar última ronda cerrada
     const lastClosedIdx = rounds.map((r,i)=>r.closed?i:-1).filter(i=>i>=0).pop();
@@ -310,37 +313,45 @@ export default function BarApp() {
     await saveTable(tid,{...t,rounds});
   };
 
-  const updQty=(tid,ridx,iid,d)=>{
-    const t=tables[tid];const rounds=[...(t.rounds||[])];
+  const updQty=async(tid,ridx,iid,d)=>{
+    const snap=await getDoc(doc(db,"tables",tid));
+    const t=snap.exists()?snap.data():tables[tid];
+    const rounds=[...(t.rounds||[])];
     const item=rounds[ridx]?.items.find(i=>i.id===iid);
     if(!item||item.paid) return;
     const nq=item.qty+d;
     rounds[ridx]={...rounds[ridx],items:nq<=0?rounds[ridx].items.filter(i=>i.id!==iid):rounds[ridx].items.map(i=>i.id===iid?{...i,qty:nq}:i)};
-    saveTable(tid,{...t,rounds});
+    await saveTable(tid,{...t,rounds});
   };
 
-  const markPaid=(tid,ridx,iid,method)=>{
-    const t=tables[tid];const rounds=[...(t.rounds||[])];
-    rounds[ridx]={...rounds[ridx],items:rounds[ridx].items.map(i=>i.id===iid?{...i,paid:true,payMethod:method,paidBy:user?.name}:i)};
-    saveTable(tid,{...t,rounds});
+  const markPaid=async(tid,ridx,iid,method)=>{
+    const snap=await getDoc(doc(db,"tables",tid));
+    const t=snap.exists()?snap.data():tables[tid];
+    const rounds=[...(t.rounds||[])];
+    rounds[ridx]={...rounds[ridx],items:(rounds[ridx].items||[]).map(i=>i.id===iid?{...i,paid:true,payMethod:method,paidBy:user?.name}:i)};
+    await saveTable(tid,{...t,rounds});
   };
 
-  const addPayment=(tid,amount,method,note)=>{
-    const t=tables[tid];
-    const payments=[...(t.payments||[]),{id:genId(),amount:Number(amount),method,note,at:now(),by:user?.name}];
-    saveTable(tid,{...t,payments});
+  const addPayment=async(tid,amount,method,note)=>{
+    const snap=await getDoc(doc(db,"tables",tid));
+    const t=snap.exists()?snap.data():tables[tid];
+    const payments=[...(t.payments||[]),{id:genId(),amount:parseMoney(amount),method,note,at:now(),by:user?.name}];
+    await saveTable(tid,{...t,payments});
   };
 
-  const setDiscount=(tid,pct)=>{
-    const t=tables[tid];
-    saveTable(tid,{...t,discount:Math.min(100,Math.max(0,Number(pct)))});
+  const setDiscount=async(tid,pct)=>{
+    const snap=await getDoc(doc(db,"tables",tid));
+    const t=snap.exists()?snap.data():tables[tid];
+    await saveTable(tid,{...t,discount:Math.min(100,Math.max(0,Number(pct)))});
     audit("Descuento",`Mesa ${t?.label} — ${pct}%`);
   };
 
-  const closeTable=(tid)=>{
-    const t=tables[tid];
+  const closeTable=async(tid)=>{
+    const snap=await getDoc(doc(db,"tables",tid));
+    const t=snap.exists()?snap.data():tables[tid];
     const allItems=(t.rounds||[]).flatMap(r=>r.items||[]);
-    const totalVenta=allItems.reduce((s,i)=>s+i.price*i.qty,0);
+    const subVenta=allItems.reduce((s,i)=>s+(Number(i.price)||0)*i.qty,0);
+    const totalVenta=subVenta-Math.round(subVenta*((t.discount||0)/100));
     const totalEfectivo=allItems.filter(i=>i.paid&&i.payMethod==="efectivo").reduce((s,i)=>s+i.price*i.qty,0)
       +(t.payments||[]).filter(p=>p.method==="efectivo").reduce((s,p)=>s+p.amount,0);
     const totalTransferencia=allItems.filter(i=>i.paid&&i.payMethod==="transferencia").reduce((s,i)=>s+i.price*i.qty,0)
@@ -348,7 +359,7 @@ export default function BarApp() {
     const sess={rounds:t.rounds,payments:t.payments,discount:t.discount,openedAt:t.openedAt,openedBy:t.openedBy,closedAt:now(),closedBy:user?.name,totalVenta,totalEfectivo,totalTransferencia};
     const auditEntry={id:genId(),at:`${today()} ${now()}`,user:user?.name||"?",action:"Cerrar mesa",detail:`Mesa ${t.label} — ${fmt(totalVenta)}`,tableDetail:{mesa:t.label,openedAt:t.openedAt,openedBy:t.openedBy,closedAt:now(),closedBy:user?.name,totalVenta,totalEfectivo,totalTransferencia,rounds:t.rounds,payments:t.payments}};
     addAudit(auditEntry);
-    saveTable(tid,{id:tid,label:t.label,status:"free",rounds:[],discount:0,payments:[],openedAt:null,openedBy:null,sessions:[...(t.sessions||[]),sess]});
+    await saveTable(tid,{id:tid,label:t.label,status:"free",rounds:[],discount:0,payments:[],openedAt:null,openedBy:null,sessions:[...(t.sessions||[]),sess]});
     setActiveId(null);setView("floor");
   };
 
@@ -365,7 +376,7 @@ export default function BarApp() {
   const startDay=async(baseCash)=>{
     const d=new Date();
     const label=`${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]} ${d.getFullYear()}`;
-    setDayOpFB({date:today(),label,openedAt:now(),openedBy:user?.name,baseCash:Number(baseCash),status:"open"});
+    setDayOpFB({date:today(),label,openedAt:now(),openedBy:user?.name,baseCash:parseMoney(baseCash),status:"open"});
     TABLE_IDS_.forEach(id=>saveTable(id,emptyTable_(id)));
     await clearExpenses();
     audit("Iniciar día",label);
@@ -373,7 +384,13 @@ export default function BarApp() {
 
   const closeDay=async()=>{
     let cash=0,transfer=0,allItems=[];
-    Object.values(tables).forEach(t=>{
+    // Leer todas las mesas frescas desde Firebase para evitar estado stale
+    const freshTables={};
+    for(const tid of TABLE_IDS_){
+      const snap=await getDoc(doc(db,"tables",tid));
+      freshTables[tid]=snap.exists()?snap.data():(tables[tid]||emptyTable_(tid));
+    }
+    Object.values(freshTables).forEach(t=>{
       (t.sessions||[]).forEach(s=>{
         if(s.totalEfectivo!==undefined){
           cash+=s.totalEfectivo||0;
@@ -397,7 +414,7 @@ export default function BarApp() {
       }
     });
     const byP={};
-    allItems.forEach(i=>{if(!byP[i.name])byP[i.name]={name:i.name,units:0,total:0};byP[i.name].units+=i.qty;byP[i.name].total+=i.price*i.qty;});
+    allItems.forEach(i=>{if(!byP[i.name])byP[i.name]={name:i.name,units:0,total:0};byP[i.name].units+=i.qty;byP[i.name].total+=(Number(i.price)||0)*i.qty;});
     const gross=cash+transfer;
     const paidCreditsToday=credits.filter(c=>c.status==="paid"&&c.paidDate===today());
     const creditsCash=paidCreditsToday.filter(c=>c.payMethod==="efectivo").reduce((s,c)=>s+c.total,0);
@@ -1507,7 +1524,7 @@ function InventoryView({inventory,saveInventoryItem,deleteInventoryItem,categori
   const mc=pct=>pct===null?"#555":pct>=40?"#34d399":pct>=20?"#f5c842":"#f87171";
   const save=()=>{
     if(!form.name) return;
-    const item={...form,stock:+form.stock,min:+form.min,cost:+form.cost,price:+form.price,active:true};
+    const item={...form,stock:parseMoney(form.stock),min:parseMoney(form.min),cost:parseMoney(form.cost),price:parseMoney(form.price),active:true};
     if(editId){saveInventoryItem({...inventory.find(x=>x.id===editId),...item});audit("Editar inventario",form.name);setEditId(null);}
     else{saveInventoryItem({...item,id:genId()});audit("Agregar inventario",form.name);}
     setForm({name:"",cat:"",stock:"",min:"",unit:"und.",cost:"",price:""});setShow(false);
@@ -1517,7 +1534,7 @@ function InventoryView({inventory,saveInventoryItem,deleteInventoryItem,categori
     audit(item.active===false?"Activar producto":"Desactivar producto",item.name);
   };
   const startEdit=item=>{setForm({name:item.name,cat:item.cat,stock:item.stock,min:item.min,unit:item.unit,cost:item.cost,price:item.price||""});setEditId(item.id);setShow(true);};
-  const addStock=id=>{const qty=parseInt(addQtys[id]||0);if(!qty||qty<=0)return;const foundItem=inventory.find(i=>i.id===id);if(foundItem){saveInventoryItem({...foundItem,stock:foundItem.stock+qty});audit("Carga stock",`${foundItem.name} +${qty}`);}setAddQtys(q=>({...q,[id]:""}));};
+  const addStock=id=>{const qty=parseMoney(addQtys[id]);if(!qty||qty<=0)return;const foundItem=inventory.find(i=>i.id===id);if(foundItem){saveInventoryItem({...foundItem,stock:(Number(foundItem.stock)||0)+qty});audit("Carga stock",`${foundItem.name} +${qty}`);}setAddQtys(q=>({...q,[id]:""}));};
   const cats=["Todos",...(categories||[]),...new Set(inventory.filter(i=>!(categories||[]).includes(i.cat)).map(i=>i.cat))].filter((v,i,a)=>a.indexOf(v)===i);
   const filtered=filterCat==="Todos"?inventory:inventory.filter(i=>i.cat===filterCat);
   return (
@@ -1631,7 +1648,7 @@ function ExpensesView({expenses,addExpense,deleteExpense,monthlyExp,addMonthlyEx
               <select value={formDay.cat} onChange={e=>setFormDay(f=>({...f,cat:e.target.value}))} style={{...inp,marginBottom:7,background:"#1a1826"}}>
                 {["Insumos","Personal","Mantenimiento","Otros"].map(c=><option key={c}>{c}</option>)}
               </select>
-              <button onClick={()=>{if(formDay.desc&&formDay.amount){addExpense({...formDay,id:genId(),amount:+formDay.amount});audit("Gasto día",`${formDay.desc} ${fmt(+formDay.amount)}`);setFormDay({desc:"",cat:"Insumos",amount:"",date:today()});setShowDay(false);}}} style={{...btnS("red"),width:"100%",padding:"9px 0"}}>Registrar gasto del día</button>
+              <button onClick={()=>{if(formDay.desc&&formDay.amount){addExpense({...formDay,id:genId(),amount:parseMoney(formDay.amount)});audit("Gasto día",`${formDay.desc} ${fmt(parseMoney(formDay.amount))}`);setFormDay({desc:"",cat:"Insumos",amount:"",date:today()});setShowDay(false);}}} style={{...btnS("red"),width:"100%",padding:"9px 0"}}>Registrar gasto del día</button>
             </div>
           )}
           {expenses.length===0&&<p style={{color:"#444",fontSize:13,textAlign:"center",padding:20}}>Sin gastos registrados hoy</p>}
@@ -1660,7 +1677,7 @@ function ExpensesView({expenses,addExpense,deleteExpense,monthlyExp,addMonthlyEx
               <select value={formMon.cat} onChange={e=>setFormMon(f=>({...f,cat:e.target.value}))} style={{...inp,marginBottom:7,background:"#1a1826"}}>
                 {["Arriendo","Servicios públicos","Nómina","Seguridad social","Impuestos","Otros"].map(c=><option key={c}>{c}</option>)}
               </select>
-              <button onClick={()=>{if(formMon.desc&&formMon.amount){addMonthlyExp({...formMon,id:genId(),amount:+formMon.amount});audit("Gasto mensual",`${formMon.desc} ${fmt(+formMon.amount)}`);setFormMon({desc:"",cat:"Arriendo",amount:""});setShowMon(false);}}} style={{...btnS("purple"),width:"100%",padding:"9px 0"}}>Registrar gasto fijo</button>
+              <button onClick={()=>{if(formMon.desc&&formMon.amount){addMonthlyExp({...formMon,id:genId(),amount:parseMoney(formMon.amount)});audit("Gasto mensual",`${formMon.desc} ${fmt(parseMoney(formMon.amount))}`);setFormMon({desc:"",cat:"Arriendo",amount:""});setShowMon(false);}}} style={{...btnS("purple"),width:"100%",padding:"9px 0"}}>Registrar gasto fijo</button>
             </div>
           )}
           {(monthlyExp||[]).length===0&&<p style={{color:"#444",fontSize:13,textAlign:"center",padding:20}}>Sin gastos fijos registrados</p>}
@@ -1901,7 +1918,7 @@ function NightReportView({report,onBack,username,isAdmin,onExport}){
       <div style={{padding:16,background:report.net>=0?"rgba(52,211,153,0.08)":"rgba(248,113,113,0.08)",border:`1px solid ${report.net>=0?"rgba(52,211,153,0.35)":"rgba(248,113,113,0.35)"}`,borderRadius:14,marginBottom:14,textAlign:"center"}}>
         <p style={{fontSize:11,color:"#666",textTransform:"uppercase",letterSpacing:1,margin:"0 0 6px"}}>Resultado neto de la noche</p>
         <div style={{fontSize:32,fontWeight:800,color:report.net>=0?"#34d399":"#f87171"}}>{fmt(report.net)}</div>
-        <p style={{fontSize:11,color:"#666",margin:"6px 0 0"}}>Ventas {fmt(report.gross)} − Gastos {fmt(report.expenses||0)}</p>
+        <p style={{fontSize:11,color:"#666",margin:"6px 0 0"}}>Ventas {fmt(report.gross)}{(report.creditsTotal||0)>0?` + Créditos ${fmt(report.creditsTotal)}`:""} − Gastos {fmt(report.expenses||0)}</p>
       </div>
       <div style={{padding:15,background:"rgba(245,200,66,0.05)",border:"1px solid rgba(245,200,66,0.22)",borderRadius:14,marginBottom:14}}>
         <p style={{fontSize:11,color:"#555",textTransform:"uppercase",letterSpacing:1,marginBottom:11}}>Desglose de ingresos</p>
@@ -1921,6 +1938,19 @@ function NightReportView({report,onBack,username,isAdmin,onExport}){
         <div style={{height:1,background:"rgba(248,113,113,0.2)",margin:"8px 0"}}/>
         <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,color:"#f87171",fontWeight:700}}>Total gastos</span><span style={{fontSize:14,color:"#f87171",fontWeight:800}}>{fmt(report.expenses||0)}</span></div>
       </div>
+      {(report.paidCreditsToday||[]).length>0&&(
+        <div style={{padding:14,background:"rgba(96,165,250,0.06)",border:"1px solid rgba(96,165,250,0.22)",borderRadius:14,marginBottom:14}}>
+          <p style={{fontSize:11,color:"#555",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>📒 Créditos cobrados hoy</p>
+          {(report.paidCreditsToday||[]).map((c,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <span style={{fontSize:12,color:"#888"}}>{c.clientName} · {c.payMethod}</span>
+              <span style={{fontSize:12,fontWeight:600,color:"#60a5fa"}}>{fmt(c.total)}</span>
+            </div>
+          ))}
+          <div style={{height:1,background:"rgba(96,165,250,0.2)",margin:"8px 0"}}/>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,color:"#60a5fa",fontWeight:700}}>Total cobrado en créditos</span><span style={{fontSize:14,color:"#60a5fa",fontWeight:800}}>{fmt(report.creditsTotal||0)}</span></div>
+        </div>
+      )}
       {isAdmin&&(
         <div style={{padding:13,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,marginBottom:12}}>
           <p style={{fontSize:11,color:"#555",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Ventas por producto</p>
@@ -1967,7 +1997,7 @@ function MonthlyView({dailyLog,inventory,monthlyExp,credits,onBack,onCloseMonth}
   if(selectedDay){
     const d=selectedDay;
     const byPArr=Object.values(d.byProd||{}).sort((a,b)=>b.total-a.total);
-    const invMap={};(inventory||[]).forEach(i=>{invMap[i.name]=i;});
+    const invMap={};((d.inventory&&d.inventory.length?d.inventory:inventory)||[]).forEach(i=>{invMap[i.name]=i;});
     return (
       <div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
